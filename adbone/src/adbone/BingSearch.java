@@ -4,11 +4,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Scanner;
 import java.io.BufferedInputStream;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
 
 import org.apache.commons.codec.binary.Base64;
 import org.json.JSONArray;
@@ -18,16 +19,29 @@ import org.json.JSONTokener;
 
 public class BingSearch {
 	private String accountKey;
-	private String bingUrl = "https://api.datamarket.azure.com/Bing/Search/Web?";
+	private String bingUrl;
 	private String query;
 	private int precision = 10;
 	private String format = "JSON";
 	private int round = 0;
 	private PriorityQueue<QueryItem> items;
+	private Map<String, Integer> dictionary;
+	private Scanner scanIn;
 	
-	public BingSearch(String accountKey) {
+	public BingSearch(String accountKey) throws IOException {
 		this.accountKey = accountKey;
-		items = new PriorityQueue<QueryItem>();
+		items = new PriorityQueue<QueryItem>(precision, 
+				new Comparator<QueryItem>() {
+			public int compare(QueryItem qitem1, QueryItem qitem2) {
+				if (qitem1.getRank() < qitem2.getRank()) {
+					return -1;
+				} else {
+					return 1;
+				}
+			}
+		});
+		dictionary = new HashMap<String, Integer>();
+		scanIn = new Scanner(System.in);
 	}
 	
 	public String search() throws IOException {
@@ -35,18 +49,12 @@ public class BingSearch {
 		byte[] accountKeyBytes = Base64.encodeBase64((accountKey + ":" + accountKey).getBytes());
 		String accountKeyEnc = new String(accountKeyBytes);
 
-		bingUrl += "Query=%27" + query + "%27&$top=" 
+		bingUrl = "https://api.datamarket.azure.com/Bing/Search/Web?" + 
+				"Query=%27" + query + "%27&$top=" 
 				+ precision + "&$format=" + format;
 		URL url = new URL(bingUrl);
 		URLConnection urlConnection = url.openConnection();
 		urlConnection.setRequestProperty("Authorization", "Basic " + accountKeyEnc);
-
-//		InputStream inputStream = (InputStream) urlConnection.getContent();
-//		byte[] contentRaw = new byte[urlConnection.getContentLength()];
-//		inputStream.read(contentRaw);
-//		String content = new String(contentRaw);
-//		
-//		return content;
 		
 		InputStream is = urlConnection.getInputStream();
 		BufferedInputStream bis = new BufferedInputStream(is);
@@ -54,45 +62,81 @@ public class BingSearch {
 		bis.read(contentRaw);
 		String content = new String(contentRaw);
 		
+		System.out.format("Round %d\n", round);
+		
 		return content;
 	}
 	
-	public void record(String content) throws IOException {
-		File outfile = new File("response.txt");
-		if (!outfile.exists()) {
-			outfile.createNewFile();
-		}
-		
-		FileWriter fw = new FileWriter(outfile.getAbsoluteFile());
-		BufferedWriter bw = new BufferedWriter(fw);
-		bw.write("Round " + round + "\n");
-		bw.write(content+"\n");
-		
-		bw.close();		
-		System.out.println("wrote the response into file");
-	}
-	
-	public void parseJSON(String content) throws JSONException, IOException {
+	public double parseJSON(String content) throws JSONException, IOException {
 		JSONTokener jtokener = new JSONTokener(content);
 		JSONObject jobject = new JSONObject(jtokener);
 		JSONArray jarray = jobject.getJSONObject("d").getJSONArray("results");
 		
+		int yes = 0;
 		for (int i = 0; i < jarray.length(); i++) {
 			String title = jarray.getJSONObject(i).getString("Title");
 			String dep = jarray.getJSONObject(i).getString("Description");
 			String link = jarray.getJSONObject(i).getString("Url");
+			String type = jarray.getJSONObject(i).getJSONObject("__metadata").getString("type");
+			
+			// ignore non-html result
+			if (!type.equals("WebResult")) {
+				continue;
+			}
+			
+			System.out.format("\nTitle: %s\n", title);
+			System.out.format("Link: %s\n", link);
+			System.out.format("Summary: %s\n\n", dep);
+			System.out.format("Is this relevant? (Y/N)\t");
+			
+			String yesno = scanIn.nextLine();
+			yesno = yesno.toLowerCase();
+			while (!yesno.equals("y") && !yesno.equals("n") && !yesno.equals("")) {
+				System.out.format("Please input (Y/N)\t");
+				yesno = scanIn.nextLine();
+				yesno = yesno.toLowerCase();
+			}
 			
 			QueryItem qitem = new QueryItem();
-			qitem.setTitle(title);
-			qitem.setDescription(dep);
-			qitem.setLind(link);
+			String summary = title + " " + dep;
+			qitem.setSummary(summary.toLowerCase());
+			if (yesno.equals("y") || yesno.equals("")) {
+				qitem.setRelevant(true);
+				yes++;
+			}
 			
 			items.add(qitem);
+		}	
+
+		double relevance = (double)yes/jarray.length();
+		
+		return relevance;
+	}
+	
+	public void run() throws JSONException, IOException {
+		double relevance;
+		do {
+			String content = search();
+			relevance = parseJSON(content);
+			
+			System.out.format("\nRelevance: %s\n\n", relevance);
+			
+			calculate();
+			
+			
+			// update query
+			
+		} while (relevance < 0.9 && relevance > 0.01);
+	}
+	
+	private void calculate() {
+		for (QueryItem iter: items) {
 			
 		}
-		
-		record(content);
-		
+	}
+	
+	public void close() {
+		scanIn.close();
 	}
 	
 	public String getBingUrl() {
@@ -131,8 +175,7 @@ public class BingSearch {
 		bs.setPrecision(10);
 		bs.setQuery("gates");
 		
-		String content = bs.search();
-		bs.parseJSON(content);
+		bs.run();
 		
 		System.out.println("Done");
 		

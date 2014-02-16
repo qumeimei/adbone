@@ -99,15 +99,28 @@ public class BingSearch {
 			
 			QueryItem qitem = new QueryItem();
 			String summary = title + " " + dep;
-			qitem.setSummary(summary.toLowerCase());
+			
+			// optimize the content
+			summary = summary.toLowerCase();
+			summary = summary.trim();
+			String[] stringarray = summary.split("\\s+");
+			summary = "";
+			for (String iter : stringarray) {
+				iter = iter.replaceAll("^[^a-z0-9]+", "");
+				iter = iter.replaceAll("[^a-z0-9]+$", "");
+				if (!iter.equals("")) {
+					summary += iter + " ";
+				}
+			}
+			qitem.setSummary(summary);
+			
 			if (yesno.equals("y") || yesno.equals("")) {
 				qitem.setRelevant(true);
 				yes++;
 			}
 			
 			items.add(qitem);
-		}	
-
+		}
 		double relevance = (double)yes/jarray.length();
 		
 		return relevance;
@@ -131,7 +144,7 @@ public class BingSearch {
 	
 	private void calculate() {
 		for (QueryItem iter: items) {
-			
+
 		}
 	}
 	
@@ -174,7 +187,6 @@ public class BingSearch {
 		BingSearch bs = new BingSearch(TEST_ACCOUNT_KEY);
 		bs.setPrecision(10);
 		bs.setQuery("gates");
-		
 		bs.run();
 		
 		System.out.println("Done");
